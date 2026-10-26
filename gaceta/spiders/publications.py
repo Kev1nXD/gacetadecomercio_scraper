@@ -16,9 +16,9 @@ class PublicationsSpider(scrapy.Spider):
     allowed_domains = ["servicios.seprec.gob.bo"]
     base_url = "https://servicios.seprec.gob.bo/api/"
 
-    def __init__(self, output_mode="csv", output_dir=None, max_pages=None, *args, **kwargs):
+    def __init__(self, output_mode="csv", output_dir=None, max_pages=None, max_sleep=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if output_mode not in {"csv", "files"}:
+        if output_mode not in ("csv", "files"):
             raise ValueError("output_mode must be 'csv' or 'files'")
         self.output_mode = output_mode
         self.output_dir = output_dir
@@ -30,9 +30,20 @@ class PublicationsSpider(scrapy.Spider):
         if self.max_pages is not None and self.max_pages < 1:
             raise ValueError("max_pages must be a positive integer")
 
+        try:
+            self.max_sleep = int(max_sleep) if max_sleep is not None else None
+        except (TypeError, ValueError) as e:
+            raise ValueError("max_sleep must be a positive integer") from e
+        if self.max_sleep is not None and self.max_sleep < 1:
+            raise ValueError("max_sleep must be a positive integer")
+
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super().from_crawler(crawler, *args, **kwargs)
+        if spider.max_sleep is not None:
+            if spider.max_sleep < crawler.settings.getint("RATE_LIMIT_MIN_DELAY", 1):
+                raise ValueError("max_sleep must be at least RATE_LIMIT_MIN_DELAY")
+            crawler.settings.set("RATE_LIMIT_MAX_DELAY", spider.max_sleep, priority="cmdline")
         timestamp = datetime.now(tzlocal.get_localzone()).strftime("%Y%m%d_%H%M%S_%f")
         base_dir = Path(spider.output_dir or crawler.settings["OUTPUT_DIR"]).expanduser().resolve()
         run_dir = base_dir / timestamp
@@ -60,7 +71,7 @@ class PublicationsSpider(scrapy.Spider):
         )
         return user_agent, major
 
-    def get_headers(self):
+    def get_headers(self) -> dict:
         user_agent, major = self.get_random_user_agent()
         return {
           'accept': 'application/json, text/plain, */*',

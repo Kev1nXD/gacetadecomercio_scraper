@@ -20,10 +20,10 @@ class PublicationFilesPipeline:
     def process_item(self, item):
         document = item.pop("document_base64")
         text = item.pop("publication_text")
-        company = self.filename_part(item.get("company_name"), "unknown_company", 45)
-        registration = self.filename_part(item.get("registration_number"), "unknown_registration", 20)
+        company = self.filename_part(item.get("company_name"), "unknown_company")
+        registration = self.filename_part(item.get("registration_number"), "unknown_registration")
         filename = f"{company}_{registration}"
-        files = []
+        file = None
         if document:
             try:
                 content = base64.b64decode("".join(document.split()), validate=True)
@@ -32,26 +32,25 @@ class PublicationFilesPipeline:
                 self.stats.inc_value("publications/invalid_pdf")
             else:
                 if content.startswith(b"%PDF-"):
-                    files.append(self.save("files", filename + ".pdf", content))
+                    file = self.save("files", filename + ".pdf", content)
                 else:
                     logger.error("Document is not a PDF for publication %s", filename)
                     self.stats.inc_value("publications/invalid_pdf")
-        if text:
-            files.append(self.save("files", filename + ".txt", text.encode("utf-8")))
-        if not files:
-            logger.error("No document or full text for publication %s", filename)
-        if files:
+        if text and not file:
+            file = self.save("files", filename + ".txt", text.encode("utf-8"))
+        if file:
             self.stats.inc_value("publications/saved")
         else:
+            logger.error("No document or full text for publication %s", filename)
             self.stats.inc_value("publications/missing_content")
-        item["file_name"] = ";".join(files)
-        item["collection_status"] = "complete" if files else "missing_content"
+        item["file_name"] = file
+        item["collection_status"] = "complete" if file else "missing_content"
         return item
 
     @staticmethod
-    def filename_part(value, fallback, length):
+    def filename_part(value, fallback):
         value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(value or ""))
-        value = re.sub(r"\s+", " ", value).strip(" ._")[:length].rstrip(" .")
+        value = re.sub(r"\s+", " ", value).strip(" ._")[:250].rstrip(" .")
         return value or fallback
 
     def save(self, directory, filename, content):
